@@ -8,7 +8,7 @@ This application demonstrates a complete event-driven pipeline where uploaded PD
 
 ## 📺 Live Walkthrough
 
-![Dashboard Walkthrough](src/assets/aiven-doc-processing-walkthorugh.mp4)
+<video width="100%" src="src/assets/aiven-doc-processing-walkthrough.mp4" controls muted autoplay loop></video>
 
 ---
 
