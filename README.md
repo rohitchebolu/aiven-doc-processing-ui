@@ -10,7 +10,9 @@ This application demonstrates a complete event-driven pipeline where uploaded PD
 
 
 <div align="center">
-  <video width="100%" src="src/assets/aiven-doc-processing-walkthrough.mp4" controls muted autoplay loop></video>
+  <a href="https://www.youtube.com/watch?v=tYdKBhsdspc">
+    <img src="https://img.youtube.com/vi/tYdKBhsdspc/maxresdefault.jpg" alt="Watch the video" width="600" />
+  </a>
 </div>
 
 <br/>
