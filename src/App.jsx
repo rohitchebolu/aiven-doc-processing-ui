@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef, useDeferredValue, startTransition } from 'react';
 
 const STAGES = ['uploaded', 'queued', 'processing', 'grouping', 'extracting', 'completed'];
 
