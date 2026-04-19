@@ -39,6 +39,16 @@ const SERVICES = [
     icon: 'V',
     stat: 'Cache hits',
   },
+  {
+    id: 'opensearch',
+    name: 'OpenSearch',
+    role: 'Full-text search',
+    description: 'Every completed extraction is indexed — filename, content, and metadata. Search across all past jobs with scored, filtered queries.',
+    color: '#6941c6',
+    bg: '#f0ebff',
+    icon: 'O',
+    stat: 'Search hits',
+  },
 ];
 
 const STAGE_META = {
@@ -495,7 +505,7 @@ function CompletionModal({ isOpen, onClose, previewUrl, payload, filename }) {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
         }}>
           <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-            Persisted to PostgreSQL · Streamed via Kafka · State cached in Valkey
+            Persisted to PostgreSQL · Streamed via Kafka · State cached in Valkey · Indexed in OpenSearch
           </span>
           <button
             onClick={onClose}
@@ -515,6 +525,244 @@ function CompletionModal({ isOpen, onClose, previewUrl, payload, filename }) {
   );
 }
 
+/* ── Global search bar ───────────────────────────────────────────── */
+const STATUS_FILTERS = [
+  { value: '', label: 'All' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'failed', label: 'Failed' },
+  { value: 'processing', label: 'Processing' },
+];
+
+function GlobalSearch({ onJobSelect, onSearchComplete }) {
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [results, setResults] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [focused, setFocused] = useState(false);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(e.target.tagName)) {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  async function runSearch() {
+    if (!query.trim()) return;
+    setLoading(true);
+    setError('');
+    try {
+      const params = new URLSearchParams({ q: query.trim(), limit: 20 });
+      if (statusFilter) params.set('status', statusFilter);
+      const res = await fetch(`/api/search/jobs?${params}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail ?? 'Search failed.');
+      setResults(data);
+      onSearchComplete?.(data);
+    } catch (err) {
+      setError(err.message || 'Search failed.');
+      setResults(null);
+      onSearchComplete?.(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const hasResults = results != null || error;
+  const sc = (s) =>
+    s === 'completed' ? { bg: '#e8f5ef', color: '#1a7a4a' } :
+    s === 'failed'    ? { bg: '#fef2f2', color: '#b91c1c' } :
+                        { bg: '#fef9e8', color: '#a06c10' };
+
+  return (
+    <div style={{ position: 'relative' }}>
+      {/* Bar */}
+      <div style={{
+        background: 'var(--card-bg)',
+        border: `1px solid ${focused ? 'var(--accent)' : 'var(--border)'}`,
+        borderRadius: hasResults ? '12px 12px 0 0' : 12,
+        padding: '9px 12px',
+        display: 'flex', alignItems: 'center', gap: 10,
+        transition: 'border-color .2s, box-shadow .2s',
+        boxShadow: focused ? '0 0 0 3px var(--accent-glow)' : '0 1px 3px rgba(0,0,0,0.04)',
+      }}>
+        {/* Search icon */}
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+          stroke={focused ? 'var(--accent)' : 'var(--text-muted)'}
+          strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+          style={{ flexShrink: 0, transition: 'stroke .2s' }}>
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+
+        {/* Input */}
+        <input
+          ref={inputRef}
+          type="text"
+          placeholder="Search jobs by filename or content…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          onKeyDown={(e) => { if (e.key === 'Enter') runSearch(); }}
+          style={{
+            flex: 1, border: 'none', outline: 'none', fontSize: 13.5,
+            fontFamily: 'var(--font-sans)', color: 'var(--text)', background: 'transparent',
+          }}
+        />
+
+        {/* Status pills */}
+        <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
+          {STATUS_FILTERS.map((f) => (
+            <button key={f.value} onClick={() => setStatusFilter(f.value)} style={{
+              padding: '3px 11px', borderRadius: 20,
+              border: `1px solid ${statusFilter === f.value ? 'var(--accent)' : 'var(--border)'}`,
+              background: statusFilter === f.value ? 'var(--accent-glow)' : 'transparent',
+              color: statusFilter === f.value ? 'var(--accent)' : 'var(--text-muted)',
+              fontSize: 11, fontWeight: 600, cursor: 'pointer',
+              fontFamily: 'var(--font-sans)', transition: 'all .15s', lineHeight: 1.6,
+            }}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Divider */}
+        <div style={{ width: 1, height: 18, background: 'var(--border)', flexShrink: 0 }} />
+
+        {/* Search button */}
+        <button
+          onClick={runSearch}
+          disabled={loading || !query.trim()}
+          style={{
+            padding: '5px 14px', background: 'var(--accent)', color: '#fff',
+            border: 'none', borderRadius: 7, fontSize: 12.5, fontWeight: 600,
+            cursor: loading || !query.trim() ? 'not-allowed' : 'pointer',
+            opacity: loading || !query.trim() ? 0.4 : 1,
+            fontFamily: 'var(--font-sans)', transition: 'opacity .15s',
+            display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
+          }}
+        >
+          {loading && (
+            <div style={{
+              width: 11, height: 11,
+              border: '2px solid rgba(255,255,255,0.35)',
+              borderTopColor: '#fff', borderRadius: '50%',
+              animation: 'spin .75s linear infinite',
+            }} />
+          )}
+          Search
+        </button>
+
+        {/* Keyboard hint */}
+        <kbd style={{
+          fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)',
+          border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px',
+          background: 'var(--row-bg)', flexShrink: 0, lineHeight: 1.8,
+        }}>/</kbd>
+      </div>
+
+      {/* Results panel */}
+      {hasResults && (
+        <div style={{
+          background: 'var(--card-bg)',
+          border: '1px solid var(--border)', borderTop: 'none',
+          borderRadius: '0 0 12px 12px',
+          animation: 'slideIn .16s ease',
+          overflow: 'hidden',
+        }}>
+          {error && <p className="error-banner" style={{ margin: '10px 14px' }}>{error}</p>}
+
+          {results && results.count === 0 && (
+            <div style={{ padding: '22px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+              No jobs match &ldquo;{results.query}&rdquo;
+            </div>
+          )}
+
+          {results && results.count > 0 && (
+            <>
+              <div style={{
+                padding: '9px 16px 7px',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                borderBottom: '1px solid var(--border)',
+              }}>
+                <span style={{ fontSize: 10.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                  {results.count} result{results.count !== 1 ? 's' : ''} &mdash; &ldquo;{results.query}&rdquo;
+                </span>
+                <button onClick={() => { setResults(null); onSearchComplete?.(null); }} style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'var(--text-muted)', fontSize: 11, fontFamily: 'var(--font-sans)',
+                  padding: '2px 6px', borderRadius: 5, transition: 'color .15s',
+                }}
+                  onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text)'}
+                  onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+                >
+                  Clear
+                </button>
+              </div>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                gap: 8, padding: '10px 12px 14px',
+              }}>
+                {results.results.map((hit) => {
+                  const s = sc(hit.status);
+                  return (
+                    <button
+                      key={hit.job_id}
+                      onClick={() => onJobSelect(hit)}
+                      style={{
+                        display: 'flex', alignItems: 'flex-start', gap: 10,
+                        padding: '9px 10px', background: 'var(--row-bg)',
+                        border: '1px solid transparent', borderRadius: 8,
+                        cursor: 'pointer', textAlign: 'left', width: '100%',
+                        transition: 'border-color .15s, background .15s',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.background = 'var(--accent-glow)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.background = 'var(--row-bg)'; }}
+                    >
+                      <div style={{ marginTop: 3, flexShrink: 0, width: 7, height: 7, borderRadius: '50%', background: s.color }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {hit.filename}
+                      </div>
+                      <div style={{ display: 'flex', gap: 10, marginTop: 3, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 10.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                          {hit.job_id.slice(0, 10)}…
+                        </span>
+                        <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
+                          {hit.order_count} order{hit.order_count !== 1 ? 's' : ''}
+                        </span>
+                        <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
+                          {formatTime(hit.processed_at ?? hit.updated_at)}
+                        </span>
+                      </div>
+                    </div>
+                      <span style={{
+                        fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
+                        padding: '2px 6px', borderRadius: 4, flexShrink: 0,
+                        background: s.bg, color: s.color, fontFamily: 'var(--font-mono)',
+                      }}>
+                        {hit.status}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Main App ────────────────────────────────────────────────────── */
 export default function App() {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -528,6 +776,7 @@ export default function App() {
   const [error, setError] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [liveMetrics, setLiveMetrics] = useState({ kafka: 92, postgres: 8, valkey: 99.8 });
+  const [searchResults, setSearchResults] = useState(null);
 
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
 
@@ -541,10 +790,16 @@ export default function App() {
     const apply = (name) => (ev) => {
       const parsed = JSON.parse(ev.data);
       if (name === 'snapshot') {
+        const snap = parsed.snapshot ?? null;
         startTransition(() => {
-          setJobSnapshot(parsed.snapshot ?? null);
-          setLiveState(parsed.live_state ?? parsed.snapshot?.live_state ?? null);
+          setJobSnapshot(snap);
+          setLiveState(parsed.live_state ?? snap?.live_state ?? null);
         });
+        if (snap?.status === 'completed') {
+          setConnState('ended');
+          src.close();
+          setTimeout(() => setModalOpen(true), 380);
+        }
         return;
       }
       startTransition(() => {
@@ -635,6 +890,17 @@ export default function App() {
     setError('');
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(file ? URL.createObjectURL(file) : '');
+  }
+
+  function handleJobSelect(hit) {
+    setEvents([]);
+    setLiveState(null);
+    setJobSnapshot(null);
+    setError('');
+    setModalOpen(false);
+    setUploadState('ready');
+    setConnState('idle');
+    startTransition(() => setJobId(hit.job_id));
   }
 
   return (
@@ -730,7 +996,7 @@ export default function App() {
         .left-col  { display:flex; flex-direction:column; gap:20px; }
         .right-col { display:flex; flex-direction:column; gap:20px; }
 
-        .service-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+        .service-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
 
         .arch-strip {
           border:1px solid var(--border); border-radius:10px; padding:13px 16px;
@@ -740,7 +1006,9 @@ export default function App() {
         .error-banner { background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; padding:8px 12px; border-radius:7px; font-size:12px; line-height:1.45; }
         @media(prefers-color-scheme:dark){.error-banner{background:#2d0f0f;border-color:#7f1d1d;color:#fca5a5;}}
 
-        @media(max-width:820px){ .layout-grid{grid-template-columns:1fr;} .service-grid{grid-template-columns:1fr;} }
+        @media(max-width:1000px){ .service-grid{grid-template-columns:repeat(2,1fr);} }
+        @media(max-width:820px){ .layout-grid{grid-template-columns:1fr;} .service-grid{grid-template-columns:repeat(2,1fr);} }
+        @media(max-width:540px){ .service-grid{grid-template-columns:1fr;} }
 
         ::-webkit-scrollbar{width:4px;height:4px}
         ::-webkit-scrollbar-track{background:transparent}
@@ -777,16 +1045,23 @@ export default function App() {
           </div>
         </div>
 
+        {/* Search bar */}
+        <GlobalSearch
+          onJobSelect={handleJobSelect}
+          onSearchComplete={setSearchResults}
+        />
+
         {/* Service cards */}
         <div className="service-grid">
           {SERVICES.map((svc) => (
             <ServiceCard
               key={svc.id} svc={svc}
-              isActive={isStreaming || isCompleted}
+              isActive={svc.id === 'opensearch' ? searchResults != null : isStreaming || isCompleted}
               eventCount={
-                svc.id === 'kafka' ? events.filter(e => e.event_type?.startsWith('job.')).length :
-                  svc.id === 'postgres' ? events.length :
-                    events.filter(e => e.stage).length
+                svc.id === 'kafka'      ? events.filter(e => e.event_type?.startsWith('job.')).length :
+                svc.id === 'postgres'   ? events.length :
+                svc.id === 'opensearch' ? (searchResults?.count ?? 0) :
+                events.filter(e => e.stage).length
               }
             />
           ))}
@@ -902,6 +1177,7 @@ export default function App() {
                   { label: 'Kafka', desc: 'Decouples upload from worker. Job moves via events, never polling.', icon: 'K', color: '#1a7a4a' },
                   { label: 'PostgreSQL', desc: 'Persists every event, result, and prompt. History survives restarts.', icon: 'P', color: '#1a4fa8' },
                   { label: 'Valkey', desc: 'Hot cache for live state. SSE reads here — zero DB hits per tick.', icon: 'V', color: '#8b1a1a' },
+                  { label: 'OpenSearch', desc: 'Indexes completed extractions for full-text search across filenames and content.', icon: 'O', color: '#6941c6' },
                 ].map((item) => (
                   <div key={item.label} style={{ display: 'flex', gap: 12 }}>
                     <div style={{
